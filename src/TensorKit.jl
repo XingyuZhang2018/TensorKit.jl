@@ -89,6 +89,7 @@ export notrunc, truncerr, truncdim, truncspace, truncbelow
 
 # Imports
 #---------
+using CUDA
 using TupleTools
 using TupleTools: StaticLength
 
