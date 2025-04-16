@@ -5,30 +5,37 @@ using BenchmarkTools
 function cuda_matrix_product(A, B, C, matrix_size)
     function kernel(A, B, C, matrix_size)
         i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+        stride = gridDim().x * blockDim().x
         
         # Fix row and column calculation (Julia uses 1-based indexing)
-        row = (i - 1) % matrix_size[1] + 1
-        col = (i - 1) ÷ matrix_size[1] + 1
+        while i <= length(C)
+            row = (i - 1) % matrix_size[1] + 1
+            col = (i - 1) ÷ matrix_size[1] + 1
 
-        sum = zero(ComplexF64)
-        
-        # Fix matrix element access method
-        for k in 1:matrix_size[2]
-            iA = (k - 1) * matrix_size[1] + row  # Column-major index for A
-            iB = (col - 1) * matrix_size[2] + k  # Column-major index for B
-            @inbounds sum += A[iA] * B[iB]
+            sum = zero(ComplexF64)
+            
+            # Fix matrix element access method
+            @inbounds for k in 1:matrix_size[2]
+                iA = (k - 1) * matrix_size[1] + row  # Column-major index for A
+                iB = (col - 1) * matrix_size[2] + k  # Column-major index for B
+                sum += A[iA] * B[iB]
+            end
+            
+            @inbounds C[i] = sum
+            i += stride
         end
-        
-        @inbounds C[i] = sum
         return
     end
 
     # Thread configuration
-    threads = 128
-    blocks = ceil(Int, length(A)/threads)
+    k = @cuda launch=false kernel(A, B, C, matrix_size)
+    config = CUDA.launch_configuration(k.fun)
+    # @show config
+    threads = min(length(A), config.threads)
+    blocks = min(cld(length(A), threads), config.blocks)
             
     # Launch kernel
-    @cuda threads=threads blocks=blocks kernel(A, B, C, matrix_size)
+    k(A, B, C, matrix_size; threads, blocks)
     CUDA.synchronize()
     return C
 end

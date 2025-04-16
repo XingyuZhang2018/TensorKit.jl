@@ -7,7 +7,7 @@ function binary_search(prefix_sum, val)
     low = 1
     high = length(prefix_sum) - 1
     while low <= high
-        mid = (low + high) ÷ 2
+        mid = (low + high) >> 1
         if prefix_sum[mid] < val
             low = mid + 1
         else
@@ -22,47 +22,58 @@ function kernel_matrix_product(A, B, C, matrix_sizes)
     prefix_sumA = CuArray([0; cumsum([prod(d[[1,2]]) for d in matrix_sizes])])
     prefix_sumB = CuArray([0; cumsum([prod(d[[2,3]]) for d in matrix_sizes])])
     prefix_sumC = CuArray([0; cumsum([prod(d[[1,3]]) for d in matrix_sizes])])
-
-    function kernel(A, B, C, matrix_sizes, prefix_sumA, prefix_sumB, prefix_sumC)
+    matrix_sizes1 = CuArray([m[1] for m in matrix_sizes])
+    matrix_sizes2 = CuArray([m[2] for m in matrix_sizes])
+    function kernel(A, B, C, matrix_sizes1, matrix_sizes2, prefix_sumA, prefix_sumB, prefix_sumC)
         idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-        
-        # Determine which matrix this thread belongs to
-        i_matrix = binary_search(prefix_sumC, idx) 
+        stride = gridDim().x * blockDim().x
 
-        # Get dimensions of current matrix
-        m1 = matrix_sizes[i_matrix][1]  # number of rows
-        m2 = matrix_sizes[i_matrix][2]  # middle dimension
+        while idx <= length(C)
+            # Determine which matrix this thread belongs to
+            i_matrix = binary_search(prefix_sumC, idx) 
 
-        # Calculate position in result matrix C
-        pos_C = idx - prefix_sumC[i_matrix]
-        row_C = mod1(pos_C, m1)
-        col_C = ((pos_C - 1) ÷ m1) + 1
+            # Get dimensions of current matrix
+            m1 = matrix_sizes1[i_matrix]  # number of rows
+            m2 = matrix_sizes2[i_matrix]  # middle dimension
 
-        sum = zero(ComplexF64)
-        
-        # Compute matrix multiplication
-        for k in 1:m2
-            iA = (k - 1) * m1 + row_C + prefix_sumA[i_matrix]
-            iB = (col_C - 1) * m2 + k + prefix_sumB[i_matrix]
-            @inbounds sum += A[iA] * B[iB]
+            # Calculate position in result matrix C
+            pos_C = idx - prefix_sumC[i_matrix]
+            row_C = mod1(pos_C, m1)
+            col_C = ((pos_C - 1) ÷ m1) + 1
+
+            sum = zero(ComplexF64)
+            
+            # Compute matrix multiplication
+            iA_shift = prefix_sumA[i_matrix] + row_C  - m1
+            iB_shift = prefix_sumB[i_matrix] + (col_C - 1) * m2
+            @inbounds @fastmath for k in 1:m2
+                iA = k * m1 + iA_shift
+                iB = k + iB_shift
+                sum += A[iA] * B[iB]
+            end
+
+            @inbounds C[idx] = sum
+            idx += stride
         end
-
-        @inbounds C[idx] = sum
         return nothing
     end
 
     # Thread configuration
-    threads = 256
-    blocks = ceil(Int, length(C)/threads)  # Calculate number of blocks based on C's length
-    
-    @cuda threads=threads blocks=blocks kernel(A, B, C, matrix_sizes, prefix_sumA, prefix_sumB, prefix_sumC)
-    CUDA.synchronize()
+    k = @cuda launch=false kernel(A, B, C, matrix_sizes1, matrix_sizes2, prefix_sumA, prefix_sumB, prefix_sumC)
+    config = launch_configuration(k.fun)
+    # @show config
+    threads = min(length(A), 128)
+    blocks = min(cld(length(A), threads), config.blocks)
+    k(A, B, C, matrix_sizes1, matrix_sizes2, prefix_sumA, prefix_sumB, prefix_sumC; threads, blocks)
+    # CUDA.synchronize()
     return C
 end
 
 
 # Test cases
-matrix_sizes = ((100, 200, 300), (200, 100, 300), (100, 300, 100), (100, 200, 300), (200, 100, 300), (100, 300, 100), (100, 200, 300), (200, 100, 300), (100, 300, 100))
+# matrix_sizes = ((100, 200, 300), (200, 100, 300), (100, 300, 100), (100, 200, 300), (200, 100, 300), (100, 300, 100), (100, 200, 300), (200, 100, 300), (100, 300, 100))
+Random.seed!(1234)
+matrix_sizes = Tuple([Tuple(rand(50:100,3)) for _ in 1:100])
 Adim = sum(map(m->prod(m[[1,2]]), matrix_sizes))
 Bdim = sum(map(m->prod(m[[2,3]]), matrix_sizes))
 Cdim = sum(map(m->prod(m[[1,3]]), matrix_sizes))
