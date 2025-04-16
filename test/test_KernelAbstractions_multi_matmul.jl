@@ -1,6 +1,7 @@
 using CUDA
 using LinearAlgebra
 using BenchmarkTools
+using KernelAbstractions
 
 # Binary search device function
 function binary_search(prefix_sum, val)
@@ -18,54 +19,46 @@ function binary_search(prefix_sum, val)
     return high
 end
 
-function kernel_matrix_product(A, B, C, matrix_sizes)
-    prefix_sumA = CuArray([0; cumsum([prod(d[[1,2]]) for d in matrix_sizes])])
-    prefix_sumB = CuArray([0; cumsum([prod(d[[2,3]]) for d in matrix_sizes])])
-    prefix_sumC = CuArray([0; cumsum([prod(d[[1,3]]) for d in matrix_sizes])])
-    matrix_sizes = CuArray(vcat([[m[1] m[2]] for m in matrix_sizes]...))
-    function kernel(A, B, C, matrix_sizes, prefix_sumA, prefix_sumB, prefix_sumC)
-        idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-        stride = gridDim().x * blockDim().x
+@kernel function multi_matmul_kernel!(A, B, C, matrix_sizes, prefix_sumA, prefix_sumB, prefix_sumC)
+    idx = @index(Global)
 
-        while idx <= length(C)
-            # Determine which matrix this thread belongs to
-            i_matrix = binary_search(prefix_sumC, idx) 
+    # Determine which matrix this thread belongs to
+    i_matrix = binary_search(prefix_sumC, idx) 
 
-            # Get dimensions of current matrix
-            m1 = matrix_sizes[i_matrix,1]  # number of rows
-            m2 = matrix_sizes[i_matrix,2]  # middle dimension
+    # Get dimensions of current matrix
+    m1 = matrix_sizes[i_matrix,1]  # number of rows
+    m2 = matrix_sizes[i_matrix,2]  # middle dimension
 
-            # Calculate position in result matrix C
-            pos_C = idx - prefix_sumC[i_matrix]
-            row_C = mod1(pos_C, m1)
-            col_C = ((pos_C - 1) ÷ m1) + 1
+    # Calculate position in result matrix C
+    pos_C = idx - prefix_sumC[i_matrix]
+    row_C = mod1(pos_C, m1)
+    col_C = ((pos_C - 1) ÷ m1) + 1
 
-            sum = zero(ComplexF64)
-            
-            # Compute matrix multiplication
-            iA_shift = prefix_sumA[i_matrix] + row_C  - m1
-            iB_shift = prefix_sumB[i_matrix] + (col_C - 1) * m2
-            @inbounds @fastmath for k in 1:m2
-                iA = k * m1 + iA_shift
-                iB = k + iB_shift
-                sum += A[iA] * B[iB]
-            end
-
-            @inbounds C[idx] = sum
-            idx += stride
-        end
-        return nothing
+    sum = zero(ComplexF64)
+    
+    # Compute matrix multiplication
+    iA_shift = prefix_sumA[i_matrix] + row_C  - m1
+    iB_shift = prefix_sumB[i_matrix] + (col_C - 1) * m2
+    @inbounds @fastmath for k in 1:m2
+        iA = k * m1 + iA_shift
+        iB = k + iB_shift
+        sum += A[iA] * B[iB]
     end
 
-    # Thread configuration
-    k = @cuda launch=false kernel(A, B, C, matrix_sizes, prefix_sumA, prefix_sumB, prefix_sumC)
-    config = launch_configuration(k.fun)
-    # @show config
-    threads = min(length(A), 128)
-    blocks = min(cld(length(A), threads), config.blocks)
-    k(A, B, C, matrix_sizes, prefix_sumA, prefix_sumB, prefix_sumC; threads, blocks)
-    # CUDA.synchronize()
-    return C
+    C[idx] = sum
+end
+
+function kernel_matrix_product(A, B, C, matrix_sizes)
+    prefix_sumA = atype([0; cumsum([prod(d[[1,2]]) for d in matrix_sizes])])
+    prefix_sumB = atype([0; cumsum([prod(d[[2,3]]) for d in matrix_sizes])])
+    prefix_sumC = atype([0; cumsum([prod(d[[1,3]]) for d in matrix_sizes])])
+    matrix_sizes = atype(vcat([[m[1] m[2]] for m in matrix_sizes]...))
+
+    backend = KernelAbstractions.get_backend(A)
+    kernel! = multi_matmul_kernel!(backend)
+    kernel!(A, B, C, matrix_sizes, prefix_sumA, prefix_sumB, prefix_sumC; ndrange = length(C))
+    KernelAbstractions.synchronize(backend)
+    return
 end
 
 
@@ -76,6 +69,7 @@ matrix_sizes = Tuple([Tuple(rand(50:100,3)) for _ in 1:100])
 Adim = sum(map(m->prod(m[[1,2]]), matrix_sizes))
 Bdim = sum(map(m->prod(m[[2,3]]), matrix_sizes))
 Cdim = sum(map(m->prod(m[[1,3]]), matrix_sizes))
+atype = CuArray
 a = CUDA.rand(ComplexF64, Adim);
 b = CUDA.rand(ComplexF64, Bdim);
 c = CUDA.rand(ComplexF64, Cdim);
