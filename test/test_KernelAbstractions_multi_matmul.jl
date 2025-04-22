@@ -39,13 +39,13 @@ end
     # Compute matrix multiplication
     iA_shift = prefix_sumA[i_matrix] + row_C  - m1
     iB_shift = prefix_sumB[i_matrix] + (col_C - 1) * m2
-    @inbounds @fastmath for k in 1:m2
+    @inbounds @fastmath @simd for k in 1:m2
         iA = k * m1 + iA_shift
         iB = k + iB_shift
         sum += A[iA] * B[iB]
     end
 
-    C[idx] = sum
+    @inbounds C[idx] = sum
 end
 
 function kernel_matrix_product(A, B, C, matrix_sizes)
@@ -65,20 +65,19 @@ end
 # Test cases
 # matrix_sizes = ((100, 200, 300), (200, 100, 300), (100, 300, 100), (100, 200, 300), (200, 100, 300), (100, 300, 100), (100, 200, 300), (200, 100, 300), (100, 300, 100))
 Random.seed!(1234)
-matrix_sizes = Tuple([Tuple(rand(50:100,3)) for _ in 1:100])
+matrix_sizes = Tuple([Tuple(rand(200:500,3)) for _ in 1:10])
 Adim = sum(map(m->prod(m[[1,2]]), matrix_sizes))
 Bdim = sum(map(m->prod(m[[2,3]]), matrix_sizes))
 Cdim = sum(map(m->prod(m[[1,3]]), matrix_sizes))
 atype = CuArray
-a = CUDA.rand(ComplexF64, Adim);
-b = CUDA.rand(ComplexF64, Bdim);
-c = CUDA.rand(ComplexF64, Cdim);
+a = atype(rand(ComplexF64, Adim));
+b = atype(rand(ComplexF64, Bdim));
+c = atype(rand(ComplexF64, Cdim));
 
-# 调用矩阵乘法
 c = CUDA.zeros(ComplexF64, Cdim);
 kernel_matrix_product(a, b, c, matrix_sizes);
 
-# # 串行验证
+# serial verification
 function serial_matrix_product(A, B, C, matrix_sizes)
     prefix_sumA = [0; cumsum([prod(d[[1,2]]) for d in matrix_sizes])]
     prefix_sumB = [0; cumsum([prod(d[[2,3]]) for d in matrix_sizes])]
@@ -102,10 +101,10 @@ Acs = Array(cs);
 # Compare results (using relative error)
 println("Relative error: ", norm(c - cs) / norm(cs))
 
-# # 性能测试
+# Benchmarking
 println("kernel_matrix_product (GPU):")
 @btime CUDA.@sync kernel_matrix_product($a, $b, $c, $matrix_sizes);
-# println("serial_matrix_product (GPU):")
-# @btime CUDA.@sync serial_matrix_product($a, $b, $cs, $matrix_sizes);
-# println("serial_matrix_product (CPU):")
-# @btime CUDA.@sync serial_matrix_product($Aa, $Ab, $Acs, $matrix_sizes);
+println("serial_matrix_product (GPU):")
+@btime CUDA.@sync serial_matrix_product($a, $b, $cs, $matrix_sizes);
+println("serial_matrix_product (CPU):")
+@btime CUDA.@sync serial_matrix_product($Aa, $Ab, $Acs, $matrix_sizes);
