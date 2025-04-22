@@ -3,7 +3,7 @@ using BenchmarkTools
 include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 
 # Simple kernel for matrix multiplication
-@kernel function matmul_kernel!(output, a, b)
+@kernel function matmul_kernel!(output, @Const(a), @Const(b))
     i, j = @index(Global, NTuple)
 
     # creating a temporary sum variable for matrix multiplication
@@ -27,15 +27,15 @@ function matmul!(output, a, b)
     return
 end
 
-N = 1000
+N = 1312
 a = rand!(allocate(backend, ComplexF64, N, N))
 b = rand!(allocate(backend, ComplexF64, N, N))
 output = KernelAbstractions.zeros(backend, ComplexF64, N, N)
 
-function foo(output, a, b)
+# function foo(output, a, b)
     matmul!(output, a, b)
     KernelAbstractions.synchronize(backend)
-end
-@btime CUDA.@sync foo($output, $a, $b);
+# end
+# @btime CUDA.@sync foo($output, $a, $b);
 # @btime CUDA.@sync c = $a * $b;
-# @test isapprox(output, a * b)
+@test isapprox(output, a * b)

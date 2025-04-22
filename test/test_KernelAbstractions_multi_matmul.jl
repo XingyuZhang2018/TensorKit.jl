@@ -32,7 +32,7 @@ end
     # Calculate position in result matrix C
     pos_C = idx - prefix_sumC[i_matrix]
     row_C = mod1(pos_C, m1)
-    col_C = ((pos_C - 1) ÷ m1) + 1
+    col_C = cld(pos_C, m1)
 
     sum = zero(ComplexF64)
     
@@ -105,7 +105,7 @@ println("Relative error: ", norm(c - cs) / norm(cs))
 # # 性能测试
 println("kernel_matrix_product (GPU):")
 @btime CUDA.@sync kernel_matrix_product($a, $b, $c, $matrix_sizes);
-println("serial_matrix_product (GPU):")
-@btime CUDA.@sync serial_matrix_product($a, $b, $cs, $matrix_sizes);
-println("serial_matrix_product (CPU):")
-@btime CUDA.@sync serial_matrix_product($Aa, $Ab, $Acs, $matrix_sizes);
+# println("serial_matrix_product (GPU):")
+# @btime CUDA.@sync serial_matrix_product($a, $b, $cs, $matrix_sizes);
+# println("serial_matrix_product (CPU):")
+# @btime CUDA.@sync serial_matrix_product($Aa, $Ab, $Acs, $matrix_sizes);
