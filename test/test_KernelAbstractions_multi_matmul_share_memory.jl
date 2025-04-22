@@ -120,7 +120,7 @@ Cdim = sum(map(m->prod(m[[1,3]]), matrix_sizes))
 atype = ROCArray
 a = atype(rand(ComplexF64, Adim));
 b = atype(rand(ComplexF64, Bdim));
-c = atype(rand(ComplexF64, Cdim));
+c = atype(zeros(ComplexF64, Cdim));
 
 kernel_matrix_product_shared(a, b, c, matrix_sizes);
 
