@@ -1,4 +1,4 @@
-using CUDA
+using AMDGPU
 using LinearAlgebra
 using BenchmarkTools
 using KernelAbstractions
@@ -26,9 +26,9 @@ end
     li = @index(Local)
 
     T = @uniform eltype(C)
-    # BLOCK_SIZE = @uniform Int(sqrt(@groupsize()[1]))
-    sA = @localmem T (BLOCK_SIZE, BLOCK_SIZE)
-    sB = @localmem T (BLOCK_SIZE, BLOCK_SIZE)
+    BLOCK_SIZE = @uniform Int(sqrt(@groupsize()[1]))
+    sA = @localmem T (16, 16)
+    sB = @localmem T (16, 16)
     i = mod1(li, BLOCK_SIZE)
     j = cld(li, BLOCK_SIZE)
 
@@ -70,7 +70,7 @@ end
         end
         
         idx_B = shift_B + k_start 
-        # @print gi,block_idx,i,j,row_C,col_C,idx_B "\n"
+
         if idx_B <= prefix_sumB[i_matrix + 1]
             @inbounds sB[i, j] = B[idx_B]
         else
@@ -102,7 +102,7 @@ function kernel_matrix_product_shared(A, B, C, matrix_sizes)
     atype_matrix_sizes = atype(vcat([[m[1] m[2] m[3]] for m in matrix_sizes]...))
 
     backend = KernelAbstractions.get_backend(A)
-    grid_size = CUDA.@allowscalar prefix_sumblock[end]
+    grid_size = AMDGPU.@allowscalar prefix_sumblock[end]
     kernel! = multi_matmul_kernel_shared!(backend)
     kernel!(A, B, C, atype_matrix_sizes, prefix_sumA, prefix_sumB, prefix_sumC, prefix_sumblock; 
             ndrange=grid_size*prod(block_size), workgroupsize=prod(block_size))
@@ -113,17 +113,15 @@ end
 
 
 Random.seed!(1234)
-matrix_sizes = Tuple([Tuple(rand(200:500,3)) for _ in 1:10])
+matrix_sizes = Tuple([Tuple(rand(50:100,3)) for _ in 1:100])
 Adim = sum(map(m->prod(m[[1,2]]), matrix_sizes))
 Bdim = sum(map(m->prod(m[[2,3]]), matrix_sizes))
 Cdim = sum(map(m->prod(m[[1,3]]), matrix_sizes))
-atype = CuArray
+atype = ROCArray
 a = atype(rand(ComplexF64, Adim));
 b = atype(rand(ComplexF64, Bdim));
 c = atype(rand(ComplexF64, Cdim));
 
-
-c = CUDA.zeros(ComplexF64, Cdim);
 kernel_matrix_product_shared(a, b, c, matrix_sizes);
 
 # serial verification
@@ -141,7 +139,7 @@ function serial_matrix_product(A, B, C, matrix_sizes)
 end
 
 
-cs = CUDA.zeros(ComplexF64, Cdim);
+cs = atype(zeros(ComplexF64, Cdim));
 serial_result = serial_matrix_product(a, b, cs, matrix_sizes);
 Aa = Array(a);
 Ab = Array(b);
@@ -152,8 +150,8 @@ println("Relative error: ", norm(c - cs) / norm(cs))
 
 # Benchmarking
 println("kernel_matrix_product_shared (GPU):")
-@btime CUDA.@sync kernel_matrix_product_shared($a, $b, $c, $matrix_sizes);
+@btime kernel_matrix_product_shared($a, $b, $c, $matrix_sizes);
 println("serial_matrix_product (GPU):")
-@btime CUDA.@sync serial_matrix_product($a, $b, $cs, $matrix_sizes);
+@btime serial_matrix_product($a, $b, $cs, $matrix_sizes);
 println("serial_matrix_product (CPU):")
-@btime CUDA.@sync serial_matrix_product($Aa, $Ab, $Acs, $matrix_sizes);
+@btime serial_matrix_product($Aa, $Ab, $Acs, $matrix_sizes);

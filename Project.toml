@@ -4,6 +4,7 @@ authors = ["Jutho Haegeman"]
 version = "0.14.3"
 
 [deps]
+AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 LRUCache = "8ac3fa9e-de4c-5943-b1dc-09c6b5f20637"
@@ -27,6 +28,7 @@ TensorKitChainRulesCoreExt = "ChainRulesCore"
 TensorKitFiniteDifferencesExt = "FiniteDifferences"
 
 [compat]
+AMDGPU = "1.2.7"
 Aqua = "0.6, 0.7, 0.8"
 CUDA = "5.6.1"
 ChainRulesCore = "1"

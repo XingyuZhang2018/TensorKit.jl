@@ -1,7 +1,8 @@
-using CUDA
+using AMDGPU
 using LinearAlgebra
 using BenchmarkTools
 using KernelAbstractions
+using Random
 
 # Binary search device function
 function binary_search(prefix_sum, val)
@@ -65,16 +66,16 @@ end
 # Test cases
 # matrix_sizes = ((100, 200, 300), (200, 100, 300), (100, 300, 100), (100, 200, 300), (200, 100, 300), (100, 300, 100), (100, 200, 300), (200, 100, 300), (100, 300, 100))
 Random.seed!(1234)
-matrix_sizes = Tuple([Tuple(rand(200:500,3)) for _ in 1:10])
+matrix_sizes = Tuple([Tuple(rand(50:100,3)) for _ in 1:100])
 Adim = sum(map(m->prod(m[[1,2]]), matrix_sizes))
 Bdim = sum(map(m->prod(m[[2,3]]), matrix_sizes))
 Cdim = sum(map(m->prod(m[[1,3]]), matrix_sizes))
-atype = CuArray
+atype = ROCArray
 a = atype(rand(ComplexF64, Adim));
 b = atype(rand(ComplexF64, Bdim));
 c = atype(rand(ComplexF64, Cdim));
 
-c = CUDA.zeros(ComplexF64, Cdim);
+c = atype(zeros(ComplexF64, Cdim));
 kernel_matrix_product(a, b, c, matrix_sizes);
 
 # serial verification
@@ -92,7 +93,7 @@ function serial_matrix_product(A, B, C, matrix_sizes)
 end
 
 
-cs = CUDA.zeros(ComplexF64, Cdim);
+cs = atype(zeros(ComplexF64, Cdim));
 serial_result = serial_matrix_product(a, b, cs, matrix_sizes);
 Aa = Array(a);
 Ab = Array(b);
@@ -103,8 +104,8 @@ println("Relative error: ", norm(c - cs) / norm(cs))
 
 # Benchmarking
 println("kernel_matrix_product (GPU):")
-@btime CUDA.@sync kernel_matrix_product($a, $b, $c, $matrix_sizes);
+@btime kernel_matrix_product($a, $b, $c, $matrix_sizes);
 println("serial_matrix_product (GPU):")
-@btime CUDA.@sync serial_matrix_product($a, $b, $cs, $matrix_sizes);
+@btime serial_matrix_product($a, $b, $cs, $matrix_sizes);
 println("serial_matrix_product (CPU):")
-@btime CUDA.@sync serial_matrix_product($Aa, $Ab, $Acs, $matrix_sizes);
+@btime serial_matrix_product($Aa, $Ab, $Acs, $matrix_sizes);
